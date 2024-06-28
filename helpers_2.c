@@ -1,7 +1,6 @@
 /*
  * File: helpers_2.c
- * Auth: Joseph Mahiuha
- *       Lewis Mwaura
+ * Auth: Eliazer Adetunji
  */
 
 #include "shell.h"

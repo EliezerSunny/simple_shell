@@ -1,7 +1,6 @@
 /*
  * File: linkedlist.c
- * Auth: Joseph Mahiuha
- *       Lewis Mwaura
+ * Auth: Eliazer Adetunji
  */
 
 #include "shell.h"
