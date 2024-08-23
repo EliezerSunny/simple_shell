@@ -1,148 +1,168 @@
-/*
- * File: getline.c
- * Auth: Eliazer Adetunji
- */
-
-#include "shell.h"
-
-void *_realloc(void *ptr, unsigned int old_size, unsigned int new_size);
-void assign_lineptr(char **lineptr, size_t *n, char *buffer, size_t b);
-ssize_t _getline(char **lineptr, size_t *n, FILE *stream);
+#include "getline.h"
+#include "string.h"
 
 /**
- * _realloc - Reallocates a memory block using malloc and free.
- * @ptr: A pointer to the memory previously allocated.
- * @old_size: The size in bytes of the allocated space for ptr.
- * @new_size: The size in bytes for the new memory block.
- *
- * Return: If new_size == old_size - ptr.
- *         If new_size == 0 and ptr is not NULL - NULL.
- *         Otherwise - a pointer to the reallocated memory block.
+ * _realloc - reallocate a buffer
+ * @old: pointer to the buffer
+ * @old_size: current size of the buffer
+ * @new_size: desired size of the buffer
+ * Return: If memory allocation fails, return NULL.
+ * Otherwise, return a pointer to the new buffer.
  */
-void *_realloc(void *ptr, unsigned int old_size, unsigned int new_size)
+static void *_realloc(void *old, size_t old_size, size_t new_size)
 {
-	void *mem;
-	char *ptr_copy, *filler;
-	unsigned int index;
+	void *new = NULL;
 
-	if (new_size == old_size)
-		return (ptr);
-
-	if (ptr == NULL)
+	if (old)
 	{
-		mem = malloc(new_size);
-		if (mem == NULL)
-			return (NULL);
-
-		return (mem);
+		if (new_size)
+		{
+			new = malloc(new_size);
+			if (new)
+			{
+				_memcpy(new, old, old_size < new_size ? old_size : new_size);
+				free(old);
+			}
+		}
+		else
+		{
+			free(old);
+		}
 	}
-
-	if (new_size == 0 && ptr != NULL)
-	{
-		free(ptr);
-		return (NULL);
-	}
-
-	ptr_copy = ptr;
-	mem = malloc(sizeof(*ptr_copy) * new_size);
-	if (mem == NULL)
-	{
-		free(ptr);
-		return (NULL);
-	}
-
-	filler = mem;
-
-	for (index = 0; index < old_size && index < new_size; index++)
-		filler[index] = *ptr_copy++;
-
-	free(ptr);
-	return (mem);
+	return (new);
 }
 
 /**
- * assign_lineptr - Reassigns the lineptr variable for _getline.
- * @lineptr: A buffer to store an input string from the user.
- * @n: The size of lineptr.
- * @buffer: The string to assign to lineptr.
- * @b: The size of buffer.
+ * _getline_next - read a line of input
+ * @buf: pointer to the static buffer
+ * @line: address of a pointer to the line
+ * @size: address of a pointer to the line size
+ * @n: number of characters to copy from the buffer
+ * Return: If memory allocation fails, return NULL.
+ * Otherwise, return a pointer to the line of input.
  */
-void assign_lineptr(char **lineptr, size_t *n, char *buffer, size_t b)
+static char *_getline_next(buf_t *buf, char **line, size_t *size, size_t n)
 {
-	if (*lineptr == NULL)
+	char *temp = NULL;
+
+	if (*line)
+		temp = _realloc(*line, *size, *size + n);
+	else
+		temp = malloc(n + 1);
+
+	if (temp)
 	{
-		if (b > 120)
-			*n = b;
-		else
-			*n = 120;
-		*lineptr = buffer;
-	}
-	else if (*n < b)
-	{
-		if (b > 120)
-			*n = b;
-		else
-			*n = 120;
-		*lineptr = buffer;
+		*line = temp;
+
+		if (*size)
+			*size -= 1;
+
+		_memcpy(*line + *size, buf->next, n);
+		*size += n;
+
+		(*line)[*size] = '\0';
+		*size += 1;
 	}
 	else
 	{
-		_strcpy(*lineptr, buffer);
-		free(buffer);
+		free(*line);
+		*line = NULL;
+		*size = 0;
 	}
+	return (*line);
 }
 
 /**
- * _getline - Reads input from a stream either file or user input.
- * @lineptr: A buffer to store the input.
- * @n: The size of lineptr.
- * @stream: The stream to read from.
- *
- * Return: The number of bytes read.
+ * _getline_buf - create, get, and delete buffers
+ * @table: buffers indexed by file descriptor
+ * @fd: file descriptor
+ * Return: NULL or a pointer to the buffer associated with fd
  */
-ssize_t _getline(char **lineptr, size_t *n, FILE *stream)
+static buf_t *_getline_buf(buf_table_t *table, const int fd)
 {
-	static ssize_t input;
-	ssize_t ret;
-	char c = 'x', *buffer;
-	int r;
+	buf_table_node_t *item = NULL;
+	size_t index = fd % GETLINE_TABLE_SIZE;
 
-	if (input == 0)
-		fflush(stream);
-	else
-		return (-1);
-	input = 0;
-
-	buffer = malloc(sizeof(char) * 120);
-	if (!buffer)
-		return (-1);
-
-	while (c != '\n')
+	if (table)
 	{
-		r = read(STDIN_FILENO, &c, 1);
-		if (r == -1 || (r == 0 && input == 0))
+		if (fd < 0)
 		{
-			free(buffer);
-			return (-1);
+			for (index = 0; index < GETLINE_TABLE_SIZE; index += 1)
+			{
+				while ((item = (*table)[index]))
+				{
+					(*table)[index] = item->next;
+					free(item);
+				}
+			}
 		}
-		if (r == 0 && input != 0)
+		else
 		{
-			input++;
-			break;
+			item = (*table)[index];
+			while (item && item->fd != fd)
+				item = item->next;
+			if (item == NULL)
+			{
+				item = malloc(sizeof(*item));
+				if (item)
+				{
+					item->fd = fd;
+					item->buf.next = NULL;
+					item->buf.remaining = 0;
+					item->next = (*table)[index];
+					(*table)[index] = item;
+				}
+			}
 		}
-
-		if (input >= 120)
-			buffer = _realloc(buffer, input, input + 1);
-
-		buffer[input] = c;
-		input++;
 	}
-	buffer[input] = '\0';
+	return (item ? &item->buf : NULL);
+}
 
-	assign_lineptr(lineptr, n, buffer, input);
+/**
+ * _getline - read a line of input
+ * @fd: file descriptor from which to read
+ * Return: If an error occurs or there are no more lines, return NULL.
+ * Otherwise, return the next line of input.
+ */
+char *_getline(const int fd)
+{
+	static buf_table_t table;
+	buf_t *buf = _getline_buf(&table, fd);
+	char *line = NULL;
+	size_t size = 0;
+	ssize_t eol = 0, n_read = 0;
 
-	ret = input;
-	if (r != 0)
-		input = 0;
-	return (ret);
+	if (buf)
+	{
+		do {
+			if (buf->remaining == 0)
+				buf->next = buf->buffer;
+			if (n_read)
+				buf->remaining = n_read;
+			if (buf->remaining)
+			{
+				eol = _memchr(buf->next, '\n', buf->remaining);
+				if (eol == -1)
+				{
+					if (_getline_next(buf, &line, &size, buf->remaining))
+						buf->next += buf->remaining, buf->remaining = 0;
+					else
+						break;
+				}
+				else
+				{
+					if (_getline_next(buf, &line, &size, eol + 1))
+						buf->next += eol + 1, buf->remaining -= eol + 1;
+					break;
+				}
+			}
+		} while ((n_read = read(fd, buf->buffer, GETLINE_BUFFER_SIZE)) > 0);
+		if (n_read == -1)
+		{
+			free(line);
+			line = NULL;
+			size = 0;
+		}
+	}
+	return (line);
 }
